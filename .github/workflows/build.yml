@@ -49,6 +49,7 @@ jobs:
           rm -rf wing dae-core outbound quic-go
           git clone --depth 1 https://github.com/daeuniverse/dae-wing wing
           git clone --depth 1 -b optimize/code-quality-fixes https://github.com/olicesx/dae dae-core
+          cd dae-core && git submodule update --init --recursive && cd ..
           git clone --depth 1 -b perf/complete-optimizations https://github.com/olicesx/outbound outbound
           git clone --depth 1 -b main https://github.com/olicesx/quic-go quic-go
 
