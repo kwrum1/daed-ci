@@ -84,7 +84,7 @@ jobs:
           go mod edit -replace github.com/daeuniverse/quic-go=../quic-go
           
           wget -qO- https://github.com/daeuniverse/dae-wing/commit/157668a.patch | patch -p1 || true
-          GOPROXY="https://goproxy.io,direct" go mod tidy
+          GOPROXY="https://goproxy.cn,direct" GOSUMDB=off go mod tidy
           cd ..
 
           echo ">>> [6/6] 打包最终源码产物..."
