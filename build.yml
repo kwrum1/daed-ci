@@ -1,0 +1,96 @@
+name: Build daed Source Package
+
+on:
+  workflow_dispatch:
+    inputs:
+      pkg_version:
+        description: '源码包版本号 (例如: 2026.02.27)'
+        required: true
+        default: '2026.02.27'
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # 允许创建 Release
+
+    steps:
+      - name: 🧰 Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 🐹 Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22' # 确保 Go 版本足够新
+          check-latest: true
+
+      - name: 🟢 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 📦 Setup pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 8
+          run_install: false
+
+      - name: 🛠️ Run Pre-build Script
+        run: |
+          ROOT_DIR="$(pwd)"
+          WORK_DIR="$ROOT_DIR/daed_build_temp"
+          PKG_VERSION="${{ github.event.inputs.pkg_version }}"
+
+          echo ">>> [1/5] 创建并进入工作区..."
+          mkdir -p "$WORK_DIR" && cd "$WORK_DIR"
+
+          echo ">>> [2/5] 拉取主线框架与优化分支..."
+          git clone --depth 1 https://github.com/daeuniverse/daed.git .
+          rm -rf wing dae-core outbound quic-go
+          git clone --depth 1 https://github.com/daeuniverse/dae-wing wing
+          git clone --depth 1 -b optimize/code-quality-fixes https://github.com/olicesx/dae dae-core
+          git clone --depth 1 -b perf/complete-optimizations https://github.com/olicesx/outbound outbound
+          git clone --depth 1 -b main https://github.com/olicesx/quic-go quic-go
+
+          echo ">>> [3/5] 前端构建与静态资源压缩 (N5000 适配)..."
+          pnpm install --no-frozen-lockfile
+          pnpm build --filter daed
+          
+          mkdir -p wing/webrender/web
+          cp -rf apps/web/dist/* wing/webrender/web/
+          find wing/webrender/web -type f -size +4k ! -name "*.gz" -exec gzip -9 -k {} \;
+
+          echo ">>> [4/5] 缝合 Go 语言依赖树..."
+          cd wing
+          go mod edit -replace github.com/daeuniverse/dae=../dae-core
+          go mod edit -replace github.com/daeuniverse/outbound=../outbound
+          go mod edit -replace github.com/daeuniverse/quic-go=../quic-go
+          
+          # 注入 Wing 兼容性补丁
+          wget -qO- https://github.com/daeuniverse/dae-wing/commit/157668a.patch | patch -p1 || true
+          
+          # 锁定依赖树，防止 OpenWrt 编译时去网上乱拉
+          GOPROXY="https://goproxy.io,direct" go mod tidy
+          cd ..
+
+          echo ">>> [5/5] 打包最终源码产物..."
+          tar -czf "$ROOT_DIR/daed-$PKG_VERSION.tar.gz" wing dae-core outbound quic-go
+          echo "打包完成：daed-$PKG_VERSION.tar.gz"
+
+      - name: 🚀 Upload Artifact (提供直接下载)
+        uses: actions/upload-artifact@v4
+        with:
+          name: daed-source-package
+          path: daed-*.tar.gz
+          retention-days: 7
+
+      - name: 🏷️ Create GitHub Release (供 OpenWrt 自动拉取)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: daed-source-latest
+          name: "daed 满血优化版源码 (N5000)"
+          body: "包含前端静态资源与 olicesx 优化版核心的预构建源码包。"
+          files: daed-*.tar.gz
+          prerelease: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
