@@ -32,7 +32,7 @@ jobs:
       - name: 📦 Setup pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 10
+          version: 9
           run_install: false
 
       - name: 🛠️ Run Pre-build Script
@@ -53,7 +53,7 @@ jobs:
           git clone --depth 1 -b main https://github.com/olicesx/quic-go quic-go
 
           echo ">>> [3/5] 前端构建与静态资源压缩 (N5000 适配)..."
-          pnpm install --no-frozen-lockfile
+          pnpm install --frozen-lockfile
           pnpm build --filter daed
           
           mkdir -p wing/webrender/web
