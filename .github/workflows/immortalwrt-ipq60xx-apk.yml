@@ -1,4 +1,4 @@
-name: Build ImmortalWrt ipq60xx (APK)
+name: Build ImmortalWrt ipq60xx APK packages only
 
 on:
   workflow_dispatch:
@@ -22,6 +22,9 @@ jobs:
   build:
     runs-on: ubuntu-22.04
     timeout-minutes: 360
+
+    permissions:
+      contents: write
 
     env:
       DEBIAN_FRONTEND: noninteractive
@@ -100,21 +103,41 @@ jobs:
         working-directory: immortalwrt
         run: make download -j$(nproc)
 
-      - name: Build firmware and APK packages
+      - name: Build APK packages only (no firmware image)
         working-directory: immortalwrt
         run: |
-          make -j$(nproc) V=s
+          set -eux
+          make package/compile -j$(nproc) V=s
+          make package/index V=s
 
-      - name: Upload target artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: immortalwrt-ipq60xx-targets
-          path: immortalwrt/bin/targets/**
-          if-no-files-found: error
+      - name: Prepare release metadata and files
+        id: release_meta
+        run: |
+          set -eux
+          DATE_TAG="$(date -u +%Y%m%d)"
+          TAG_NAME="ipq60xx-apk-${DATE_TAG}-${GITHUB_RUN_NUMBER}"
+          RELEASE_NAME="ImmortalWrt ipq60xx APK ${DATE_TAG} #${GITHUB_RUN_NUMBER}"
+          RELEASE_NOTES="ImmortalWrt APK packages for ipq60xx built on ${DATE_TAG}."
 
-      - name: Upload package artifacts
+          echo "tag_name=${TAG_NAME}" >> "$GITHUB_OUTPUT"
+          echo "release_name=${RELEASE_NAME}" >> "$GITHUB_OUTPUT"
+          echo "release_notes=${RELEASE_NOTES}" >> "$GITHUB_OUTPUT"
+
+          mkdir -p release-files
+          find immortalwrt/bin/packages -type f \( -name '*.apk' -o -name 'APKINDEX*' \) -exec cp --parents {} release-files/ \;
+
+      - name: Upload APK package artifacts
         uses: actions/upload-artifact@v4
         with:
           name: immortalwrt-ipq60xx-packages
-          path: immortalwrt/bin/packages/**
+          path: release-files/**
           if-no-files-found: error
+
+      - name: Publish APK packages to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release_meta.outputs.tag_name }}
+          name: ${{ steps.release_meta.outputs.release_name }}
+          body: ${{ steps.release_meta.outputs.release_notes }}
+          files: |
+            release-files/**
