@@ -1,4 +1,4 @@
-name: Build ImmortalWrt ipq60xx APK packages only
+name: Build ImmortalWrt ipq60xx (APK)
 
 on:
   workflow_dispatch:
@@ -100,16 +100,19 @@ jobs:
         working-directory: immortalwrt
         run: make download -j$(nproc)
 
-      - name: Build APK packages only (no firmware image)
+      - name: Build firmware and APK packages
         working-directory: immortalwrt
         run: |
-          set -eux
-          # 仅编译软件包，不生成固件镜像
-          make package/compile -j$(nproc) V=s
-          # 生成 APK 索引文件
-          make package/index V=s
+          make -j$(nproc) V=s
 
-      - name: Upload APK package artifacts
+      - name: Upload target artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: immortalwrt-ipq60xx-targets
+          path: immortalwrt/bin/targets/**
+          if-no-files-found: error
+
+      - name: Upload package artifacts
         uses: actions/upload-artifact@v4
         with:
           name: immortalwrt-ipq60xx-packages
