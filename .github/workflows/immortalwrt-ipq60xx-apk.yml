@@ -11,6 +11,10 @@ on:
         description: "ImmortalWrt fork (owner/repo)"
         required: true
         default: "VIKINGYFY/immortalwrt"
+      packages:
+        description: "Space-separated package names to build (e.g. 'daed luci-app-daed'); leave empty to build all packages"
+        required: false
+        default: "daed luci-app-daed"
   schedule:
     - cron: "0 3 * * 6"
 
@@ -74,20 +78,16 @@ jobs:
           set -eux
 
           cat > .config <<'EOF'
-          # Prefer qualcommax/ipq60xx in newer trees
           CONFIG_TARGET_qualcommax=y
           CONFIG_TARGET_qualcommax_ipq60xx=y
           CONFIG_TARGET_qualcommax_ipq60xx_DEVICE_cmiot_ax18=y
 
-          # Fallback for older target naming
           CONFIG_TARGET_ipq60xx=y
           CONFIG_TARGET_ipq60xx_generic=y
 
-          # Enable APK package manager output
           CONFIG_USE_APK=y
           CONFIG_SIGNED_PACKAGES=n
 
-          # Build defaults
           CONFIG_DEVEL=y
           CONFIG_CCACHE=y
           EOF
@@ -103,11 +103,31 @@ jobs:
         working-directory: immortalwrt
         run: make download -j$(nproc)
 
-      - name: Build APK packages only (no firmware image)
+      - name: Build selected APK packages (no firmware image)
         working-directory: immortalwrt
+        env:
+          REQUESTED_PACKAGES: ${{ github.event.inputs.packages }}
         run: |
           set -eux
-          make package/compile -j$(nproc) V=s
+          ulimit -n 4096 || true
+
+          if [ -n "${REQUESTED_PACKAGES:-}" ]; then
+            echo "Requested packages: ${REQUESTED_PACKAGES}"
+            for pkg in ${REQUESTED_PACKAGES}; do
+              echo "==> Building package/${pkg} (parallel)"
+              if ! make "package/${pkg}/compile" -j"$(nproc)" V=s; then
+                echo "Parallel build failed for ${pkg}, retrying single-threaded for diagnostics..."
+                make "package/${pkg}/compile" -j1 V=s
+              fi
+            done
+          else
+            echo "No specific package requested; building all packages (may take very long)."
+            if ! make package/compile -j"$(nproc)" V=s; then
+              echo "Parallel all-package build failed, retrying single-threaded for diagnostics..."
+              make package/compile -j1 V=s
+            fi
+          fi
+
           make package/index V=s
 
       - name: Prepare release metadata and files
