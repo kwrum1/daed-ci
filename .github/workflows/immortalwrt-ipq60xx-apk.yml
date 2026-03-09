@@ -1,0 +1,120 @@
+name: Build ImmortalWrt ipq60xx (APK)
+
+on:
+  workflow_dispatch:
+    inputs:
+      immortalwrt_ref:
+        description: "ImmortalWrt branch/tag/commit"
+        required: true
+        default: "main"
+      immortalwrt_repo:
+        description: "ImmortalWrt fork (owner/repo)"
+        required: true
+        default: "VIKINGYFY/immortalwrt"
+  schedule:
+    - cron: "0 3 * * 6"
+
+concurrency:
+  group: build-ipq60xx-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    env:
+      DEBIAN_FRONTEND: noninteractive
+
+    steps:
+      - name: Checkout current repo
+        uses: actions/checkout@v4
+
+      - name: Maximize disk space
+        uses: easimon/maximize-build-space@v10
+        with:
+          root-reserve-mb: 8192
+          temp-reserve-mb: 1024
+          remove-dotnet: true
+          remove-android: true
+          remove-haskell: true
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential \
+            bzip2 ccache clang cmake cpio curl device-tree-compiler ecj fastjar flex gawk \
+            gettext gcc-multilib g++-multilib git gperf haveged help2man intltool libc6-dev-i386 \
+            libelf-dev libfuse-dev libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev libmpfr-dev \
+            libncurses5-dev libncursesw5-dev libpython3-dev libreadline-dev libssl-dev libtool lrzsz \
+            mkisofs msmtp ninja-build p7zip p7zip-full patch pkgconf python3 python3-pip python3-ply \
+            python3-docutils python3-setuptools qemu-utils rsync scons squashfs-tools subversion swig \
+            texinfo uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev
+
+      - name: Clone ImmortalWrt source
+        run: |
+          set -eux
+          REPO="${{ github.event.inputs.immortalwrt_repo || 'VIKINGYFY/immortalwrt' }}"
+          REF="${{ github.event.inputs.immortalwrt_ref || 'main' }}"
+          git clone --filter=blob:none --depth=1 --branch "$REF" "https://github.com/${REPO}.git" immortalwrt
+
+      - name: Prepare feeds
+        working-directory: immortalwrt
+        run: |
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Generate ipq60xx APK config
+        working-directory: immortalwrt
+        run: |
+          set -eux
+
+          cat > .config <<'EOF'
+          # Prefer qualcommax/ipq60xx in newer trees
+          CONFIG_TARGET_qualcommax=y
+          CONFIG_TARGET_qualcommax_ipq60xx=y
+          CONFIG_TARGET_qualcommax_ipq60xx_DEVICE_cmiot_ax18=y
+
+          # Fallback for older target naming
+          CONFIG_TARGET_ipq60xx=y
+          CONFIG_TARGET_ipq60xx_generic=y
+
+          # Enable APK package manager output
+          CONFIG_USE_APK=y
+          CONFIG_SIGNED_PACKAGES=n
+
+          # Build defaults
+          CONFIG_DEVEL=y
+          CONFIG_CCACHE=y
+          EOF
+
+          make defconfig
+
+          if ! grep -Eq '^CONFIG_TARGET_.*ipq60xx=y' .config; then
+            echo "ipq60xx target not detected in the selected ImmortalWrt ref" >&2
+            exit 1
+          fi
+
+      - name: Download sources
+        working-directory: immortalwrt
+        run: make download -j$(nproc)
+
+      - name: Build firmware and APK packages
+        working-directory: immortalwrt
+        run: |
+          make -j$(nproc) V=s
+
+      - name: Upload target artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: immortalwrt-ipq60xx-targets
+          path: immortalwrt/bin/targets/**
+          if-no-files-found: error
+
+      - name: Upload package artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: immortalwrt-ipq60xx-packages
+          path: immortalwrt/bin/packages/**
+          if-no-files-found: error
